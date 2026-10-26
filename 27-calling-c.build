@@ -1,0 +1,4 @@
+// Sidecar for 27-calling-c.goose (same base name, same directory).
+// It looks like Goose: `//` comments, `key = value;`, strings and [lists].
+// The program's own C sources, relative to this file:
+c_sources = ["27-calling-c/impl.c"];
