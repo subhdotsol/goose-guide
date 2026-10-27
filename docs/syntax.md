@@ -77,7 +77,7 @@ fn main() {                      // entry point: `main` in the root file
 - **Identifiers**: `[A-Za-z_][A-Za-z0-9_]*`.
 - **Keywords**: `import namespace struct enum type fn thread_fn export simd
   recursive let var extern const pad reusable if else while for in loop block
-  guard match return break continue as true false null self bool varint i8 i16
+  guard defer match return break continue as true false null self bool varint i8 i16
   i32 i64 u8 u16 u32 u64 f32 f64`
 - **Contextual keywords** (keywords only in one position, ordinary names
   elsewhere):
@@ -557,6 +557,31 @@ for i in 5 { guard i % 2 == 0; print("even ", i); }   // no else: skips the rest
 - in a loop, it continues with the next iteration;
 - in a block, it ends that call.
 
+`defer` runs a statement or block when the enclosing block ends, however it
+ends (end of block, `break`, `continue`, `return`, or a `return … from`
+passing through):
+
+```goose
+fn describe(items: i64[:]) -> i64 {
+    depth++;
+    defer depth--;                     // every way out restores it
+    var count = 0;
+    for x in items {
+        defer count++;                 // runs at the end of every iteration
+        if x < 0 { continue; }
+        if x > 100 { return -1; }
+    }
+    return count;
+}
+{ defer print("block done"); print("in the block"); }   // in the block, block done
+```
+
+- Several defers run latest first, and only the ones the exit has passed.
+- The body sees variables as they are at the exit.
+- A defer body cannot `return`, `break` or `continue` out of itself, cannot use
+  long-distance returns, and cannot name the function's named result.
+- `abort`, a failed `assert` and `exit` run no defers.
+
 ---
 
 ## 16. Loops
@@ -734,6 +759,7 @@ Exceptions, from the `exception` library module:
 import exception;
 fn risky() { exception::throw(str("bad item ", 42)); }
 // exception::try<u8[]>(risky) { e => print("caught ", e); };
+// exception::try<u8[]>(risky, catch_fn, finally_fn);   // finally_fn runs on every way out
 ```
 
 Stopping the program (none of these can be caught):
@@ -1017,9 +1043,9 @@ From tightest to loosest (the same as Rust):
 | `std` | `import std;` | `min max clamp abs sign swap sort stable_sort filter map fold find find_index any all sum reverse each_rev dedup retain heap_push heap_pop binary_search lower_bound find split trim words join parse_int parse_flt to_lower to_upper rand_int rand_flt hash` |
 | `dictionary` | `import dictionary;` | `var d = dictionary<const u8[:], i64> {}`, then `d.insert(k, v)`, `d.get(k)` (gives `V?`), `d.contains(k)`, `d.update(k, 0) { it += 1; };`, `d.remove(k)`, `d.each() { … }` |
 | `vec` | `import vec;` | `vec2/3/4<T>`, `float3`, `int2`, … |
-| `math` | `import math;` | `sin cos tan asin acos atan sqrt pow exp log floor ceil round trunc mul_add radians degrees is_nan is_inf` |
+| `math` | `import math;` | `sin cos tan asin acos atan sqrt pow exp log floor ceil round trunc mul_add radians degrees is_nan is_inf is_finite` (the last four also take `f32`) |
 | `os` | `import os;` | `read_file write_file write_file_atomic append_file delete_file rename_file file_exists is_dir make_dir delete_dir list_dir read_line read_stdin write_stdout write_stderr args arg arg_count env time time_ns clock clock_ns sleep sleep_ms resource_dir` |
-| `exception` | `import exception;` | `exception::try<E>(body) { e => … }`, `exception::throw(v)` |
+| `exception` | `import exception;` | `exception::try<E>(body) { e => … }`, `exception::try<E>(body, catch, finally)`, `exception::throw(v)` |
 | `json`, `csv`, `regex`, `base64`, `binary`, `ffi` | `import json;` … | namespaced: `json::…`, `csv::…`, `regex::…` |
 | `gfx`, `audio`, `ui`, `physics` | external packages | graphics (SDL3 GPU), audio, Nuklear UI, Box3D physics |
 
@@ -1041,7 +1067,7 @@ Goose deliberately does not have:
 - Named or keyword arguments. Only trailing defaults.
 - Binary literals or numeric suffixes.
 - Labeled `break`, `step` ranges or reverse ranges.
-- `defer` / `finally`, or exceptions as a language feature (the `exception` module is a library).
+- Exceptions as a language feature (the `exception` module is a library; its `finally` is a `defer`).
 - Implicit int↔bool conversion, or implicit narrowing.
 - Operator overloading. Only the `format` hook for printing.
 - Shared memory between threads, locks or atomics.
