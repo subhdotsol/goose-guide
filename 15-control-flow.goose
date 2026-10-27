@@ -19,6 +19,37 @@ fn print_if_positive(n: i64) {
     print("  positive: ", n);
 }
 
+// ---------------------------------------------------------------
+// defer: run a statement or block when the ENCLOSING block ends,
+// however it ends: falling off the end, break, continue, return,
+// or a `return ... from` passing through.
+// ---------------------------------------------------------------
+var depth = 0;                           // a global the defer below restores
+
+fn describe(items: i64[:]) -> i64 {
+    depth++;
+    defer depth--;                       // runs on EVERY way out of describe
+    print("  depth inside describe: ", depth);
+    var count = 0;
+    for x in items {
+        defer count++;                   // in a loop body: runs at the end of EACH iteration,
+                                         // including the iterations cut short by `continue`
+        if x < 0 { continue; }           // the defer still runs: count++
+        if x > 100 { return -1; }        // return: this iteration's defer runs, then depth--
+    }
+    return count;                        // the return value is built first, THEN the defers run
+}
+
+// Several defers run LATEST FIRST, and an exit only runs the defers it has
+// already passed. Here the early return skips the third defer entirely.
+fn order(stop_early: bool) {
+    defer print("  defer 1 (written first, runs last)");
+    defer print("  defer 2");
+    if stop_early { return; }            // only defers 2 and 1 have been passed
+    defer print("  defer 3 (written last, runs first)");
+    print("  end of order body");
+}
+
 // A small enum so we can show `match` as an expression, too.
 enum Light { Red, Yellow, Green }
 
@@ -111,4 +142,40 @@ fn main() {
         guard hp > 10;                   // true: execution continues
         print("  hp > 10, block continued");
     }
+
+    // ---------------------------------------------------------------
+    // defer
+    // ---------------------------------------------------------------
+    print("defer in a function and a loop:");
+    let a = describe([1, 2, -3]);        // -3 hits continue, but count++ still runs: 3
+    let b = describe([5, 500, 7]);       // 500 returns -1 early; depth-- still runs
+    print("  describe results: ", a, " ", b, ", depth back to ", depth);
+
+    print("defer order (full run):");
+    order(false);
+    print("defer order (early return):");
+    order(true);
+
+    print("defer in a bare block:");
+    {
+        defer print("  block done");     // runs when this { } ends
+        print("  in the block");
+    }
+
+    // The defer body sees variables as they are AT THE EXIT, not when the
+    // defer was written:
+    print("defer sees the value at exit:");
+    {
+        var n = 1;
+        defer print("  n at exit = ", n);    // prints 3, not 1
+        n = 3;
+    }
+
+    // Rules (each is a compile error):
+    //   { defer { return; } }           // error: "return cannot leave a defer body (§6.6)"
+    //                                   // (same for break and continue)
+    //   defer risky_return_from();      // cannot call anything that uses `return ... from`
+    //                                   // (it may run while such a return is in flight)
+    //   defer at global scope           // a global initializer has no scope exit
+    // And `abort`, a failed `assert` or `exit` end the program WITHOUT running defers.
 }
