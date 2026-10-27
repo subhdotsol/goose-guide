@@ -192,7 +192,7 @@ goose build samples/01_tour.goose           # native executable beside the sourc
 goose build samples/01_tour.goose -o /tmp/tour && /tmp/tour
 goose build --debug file.goose              # runtime overflow and range checks + debug info
 goose file.goose -- arg1 arg2               # pass arguments to the program
-goose -q file.goose                         # print only the program's output
+goose --stats file.goose                    # also print the compile summary (parsed ok, typechecked ok, ...)
 goose format file.goose                     # format in place
 goose format --check samples stdlib         # what CI checks
 ```
