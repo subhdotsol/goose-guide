@@ -130,6 +130,7 @@ everything in append-only tables.
 - Generics, function values, trailing blocks, nested functions, UFCS.
 - Opt-in recursion (`recursive fn`).
 - Long-distance returns (`return E from f`), plus `exception::try` / `throw` built on top of them.
+- `defer` statements that run when their block ends, and `exception::try`'s `finally` built on them.
 - Namespaces (`namespace x;`, `x::name`, `::name`).
 - Threads (`thread_fn`, typed queues, contained workers).
 - Verified serialization (`to_bytes`, `from_bytes`, `bytes_of`).
@@ -195,7 +196,9 @@ items)**, not in code comments. `src/` has only two real TODO markers.
 | Doc | Status |
 |---|---|
 | `docs/design/root_structs.md` | Accepted direction; implementation planned |
-| `docs/design/scope_exit_cleanup.md` | Research note: `defer`, destructor types, pool finalizers |
+| `docs/design/scope_exit_cleanup.md` | Research note: `defer` is now implemented; destructor types, pool finalizers and `errdefer` are not |
+| `docs/design/nested_growth.md` | Research note: building a recursive tree (e.g. a JSON tape) in place |
+| `docs/design/coroutines.md` | Design note: stackless, value-typed coroutines scheduled by libraries |
 | `docs/design/soa.md` | Proposal: column (struct-of-arrays) arrays `T[||..]` |
 | `docs/design/wasm.md` | Proposal: a wasm target |
 | `docs/design/owning_dynamic_data.md` | Research: independent dynamic stacks, opaque resources |
@@ -212,11 +215,12 @@ stdlib, alignment annotations, pool GC.
 
 ### Recent development themes (git log)
 
-- CLI polish: `goose format`, `completion`, `help --man`, `-q`, colored errors, version from git describe, "did you mean" for mistyped commands.
+- CLI polish: `goose format`, `completion`, `help --man`, quiet-by-default output with `--stats`, `docs/command_line.md`, colored errors, version from git describe, "did you mean" for mistyped commands.
 - Removing dead code and sharing helpers across the typechecker, optimizer, codegen and LSP.
 - More precise relative references and result construction.
 - Runtime robustness on Windows, plus Android support in subprocess.h.
-- Small stdlib additions such as `math.mul_add`.
+- Small stdlib additions such as `math.mul_add`, `math.is_finite` and f32 forms, correctly rounded `parse_flt`, unbiased `rand_int`.
+- The `defer` statement.
 - Rewriting the documentation prose.
 
 ---
@@ -230,7 +234,7 @@ before you start a large language change.
 ### Easy: documentation fixes and housekeeping
 
 1. **`docs/design/dynamic_externs.md:30`** still says "Not implemented". The feature landed in PR #59 and is tested by `test/extern_dylib.py`. Update the status line here and in `docs/index.md`.
-2. **`README.md:593`** says "fourteen modules", while `docs/index.md` and `docs/stdlib.md` say sixteen. Make them agree.
+2. **`README.md:567`** says "fourteen modules", while `docs/index.md` and `docs/stdlib.md` say sixteen. Make them agree.
 3. **`vscode/README.md:169`** says the compiler "stops at the first error". That is no longer true now that the parser recovers from errors.
 4. **Add a `CONTRIBUTING.md`** and a PR template: how to build, how to run tests, fixture conventions (from `docs/testing.md`), the `goose format --check` rule, and when to regenerate the runtime header.
 5. **Add the tree-sitter check to CI.** `python tree-sitter/build.py --check` currently runs only by hand.
@@ -257,7 +261,7 @@ before you start a large language change.
 17. **The optimizer** (`optimize_basecase.h`, `optimize_tre.h`): base-case inlining when the base case is not the first statement; expression-bodied folds in tail-recursion elimination.
 18. **JIT** (`src/jit.h`, `src/runtime/runtime_threads.h`): emulate TLS under TinyCC so threaded programs can run in-process.
 19. **Serialization** (`docs/design/serialization.md` §7): references into payload fields, big-endian hosts.
-20. **Larger features with design docs** (talk to the maintainer first): labeled `break`, moves for resizables, `root_structs`, `defer`, SoA arrays, a wasm target.
+20. **Larger features with design docs** (talk to the maintainer first): labeled `break`, moves for resizables, `root_structs`, SoA arrays, a wasm target, coroutines.
 
 ### Contribution conventions (inferred from CI and history)
 
@@ -421,7 +425,7 @@ TinyCC cannot place thread-local storage.
 |---|---|
 | `-O0` / `-O1` / `-O2` | Inlining level (default `-O2`) |
 | `--debug` | Overflow, range and tag checks that name the source line, plus C debug info |
-| `-q` | Print only the program's output |
+| `--stats` | Print the compile summary (`parsed ok`, `typechecked ok`, `bce`, `wrote`); a successful run prints only the program's output by default |
 | `--cc msvc\|clang\|gcc\|cc\|path` | Choose the C compiler (`goose toolchain` shows which one is found) |
 | `--dry-run`, `-v` | Show the build commands without running them / as they run |
 | `--bce-lines` | Report the bounds checks that remain on each line |
