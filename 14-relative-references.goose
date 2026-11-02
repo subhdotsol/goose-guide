@@ -1,4 +1,5 @@
 import std;
+import slot_pool;
 
 // =====================================================================
 // 14. Relative references
@@ -56,12 +57,12 @@ struct Vari  { v: i64, next: Vari&<varint>? }  // variable-length encoded offset
 
 // ---------------------------------------------------------------
 // Pool-relative links + `self`: a circular doubly-linked list.
-// `ring` is a GLOBAL reusable pool; the links are offsets from its base.
+// `ring` is a GLOBAL slot_pool; the links are offsets from the base of `ring.items`.
 // The links are NON-optional, so the first node can only be built with `self`
 // (there is nothing else to point at yet).
 // ---------------------------------------------------------------
-struct Ring { val: i64, prev: Ring&<u32 in ring>, next: Ring&<u32 in ring> }
-reusable var ring: Ring[>..] = [];
+struct Ring { val: i64, prev: Ring&<u32 in ring.items>, next: Ring&<u32 in ring.items> }
+var ring = slot_pool<Ring> {};
 
 // Insert v after p: the same four stores every time, no null checks.
 fn insert_after(p: Ring&, v: i64) -> Ring& {
@@ -129,7 +130,7 @@ fn main() {
     // ---------------------------------------------------------------
     // Pool-relative ring built with `self`
     // ---------------------------------------------------------------
-    let head .= ring.push(Ring { val: 0, prev: self, next: self });  // sentinel links to itself
+    let head .= ring.alloc_with() { Ring { val: 0, prev: self, next: self } };  // sentinel links to itself
     print("sentinel: next is itself? ", head.next .== head);
     insert_after(head, 1);
     insert_after(head.prev, 2);        // append at the end (before the sentinel)
@@ -137,9 +138,9 @@ fn main() {
     var line: u8[>..] = [];
     var n .= head.next;
     while n .!= head { format(line, n.val, " "); n .= n.next; }      // walk until back at the sentinel
-    print("ring: ", line, "| slots: ", ring.len);
+    print("ring: ", line, "| slots: ", ring.items.len);
     // A value whose links are ALL `in pool` copies like any other value:
-    let copied = ring[1];              // fine: pool-relative offsets don't depend on where the copy sits
+    let copied = ring.items[1];            // fine: pool-relative offsets don't depend on where the copy sits
     print("copied pool-linked node val: ", copied.val, ", its next val: ", copied.next.val);
 
     // ---------------------------------------------------------------

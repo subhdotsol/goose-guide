@@ -1,9 +1,10 @@
 import std;
+import slot_pool;
 
-// `self` literal demo: a ring node whose links point into the global array `ring`.
-// `Ring&<u32 in ring>` is a pool-relative reference: a u32 offset from the start of `ring`.
-struct Ring { val: i64, prev: Ring&<u32 in ring>, next: Ring&<u32 in ring> }
-reusable var ring: Ring[>..] = [];
+// `self` literal demo: a ring node whose links point into the global pool `ring`.
+// `Ring&<u32 in ring.items>` is a pool-relative reference: a u32 offset from the start of `ring.items`.
+struct Ring { val: i64, prev: Ring&<u32 in ring.items>, next: Ring&<u32 in ring.items> }
+var ring = slot_pool<Ring> {};
 
 fn main() {
     // ---------------------------------------------------------------
@@ -77,6 +78,6 @@ fn main() {
     // `self`: only inside a struct literal, for relative-reference fields.
     // Here a single node links to itself: prev and next both point at it.
     // ---------------------------------------------------------------
-    let head .= ring.push(Ring { val: 7, prev: self, next: self });
+    let head .= ring.alloc_with() { Ring { val: 7, prev: self, next: self } };   // built in place in its slot
     print("self: ", head.val, " ", head.next.val, " ", head.prev .== head);
 }

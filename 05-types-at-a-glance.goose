@@ -8,6 +8,7 @@
 // Later sections (8, 10-14, 18, 22) cover each in depth.
 // ===================================================================
 import std;
+import slot_pool;
 
 // ---- declarations used by main (top-level order doesn't matter) ----
 
@@ -25,10 +26,10 @@ struct Rec { id: varint, name: u8[] }
 // u32 offset from the field to the target node in the same array.
 struct Node { key: i32, next: Node&<u32>? }
 
-// Pool-relative reference: `Ring&<u32 in ring>` is a u32 offset from the
-// start of the global array `ring`.  `self` in a literal = "link to me".
-struct Ring { val: i64, next: Ring&<u32 in ring> }
-reusable var ring: Ring[>..] = [];
+// Pool-relative reference: `Ring&<u32 in ring.items>` is a u32 offset from
+// the start of the global pool's `items`.  `self` in a literal = "link to me".
+struct Ring { val: i64, next: Ring&<u32 in ring.items> }
+var ring = slot_pool<Ring> {};
 
 // Index types: `u32 in weights` is an integer PROVEN < weights.len, so
 // indexing `weights` with it needs no bounds check. `u32 upto weights`
@@ -153,7 +154,7 @@ fn main() {
     first.next .= list.push(Node { key: 2 });   // link stored as a u32 offset
     let nx = first.next;                        // copy the optional link into a local...
     if nx { print("self-relative: ", first.key, " -> ", nx.key); }   // ...so `if` can narrow it
-    let head .= ring.push(Ring { val: 7, next: self });   // links to itself
+    let head .= ring.alloc_with() { Ring { val: 7, next: self } };   // links to itself
     print("pool-relative: ", head.val, " -> ", head.next.val);
 
     // ---------------------------------------------------------------
