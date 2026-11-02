@@ -1,4 +1,6 @@
 import std;
+import slot_pool;
+import slice_pool;
 
 // =====================================================================
 // 29. Builtins and array members
@@ -21,7 +23,11 @@ import std;
 // | qput, qget<T>, qpoll<T>, qlimit<T>        | queues                                   |
 //
 // Array members: .len .cap .push .append .pop .pop_n .resize .clear .index_of
-// Pool members:  .alloc_index .alloc_ref .free .alloc_slice .realloc_slice .free_slice
+//                .range_index .check_length
+// Slice member:  .move_from(src)
+// slot_pool:     .alloc_index .alloc_ref .alloc_with .alloc_index_with .free .free_ref .recycle_all
+// slice_pool:    .alloc_slice .alloc_copy .realloc_slice .free_slice .recycle_all
+// (both pools are library root structs: `import slot_pool;` / `import slice_pool;`)
 // =====================================================================
 
 // A struct with field defaults, used by default<T>() below.
@@ -204,30 +210,44 @@ fn main() {
     // compiler can prove no reference into the dropped part survives.
 
     // =================================================================
-    // Pool members: a `reusable` grow-only array of fixed-size elements
-    // is paired with a hidden freelist. Every slot stays a live value.
+    // Checked array operations: they abort in EVERY build when the check
+    // fails, and take an optional message as a last argument.
     // =================================================================
-    reusable var pool: Item[>..] = [];
+    var arr: i64[>..] = [1, 2, 3, 4, 5];
+    arr[1..4].move_from(arr[0..3]);            // equal-length copy, safe when the two slices overlap
+    print(".move_from: ", arr);                // [1, 1, 2, 3, 5]
+    let at = arr.range_index(arr[2..]);        // start index of a slice that lies INSIDE arr
+    print(".range_index(arr[2..]) = ", at);    // 2 (an empty slice from anywhere gives 0)
+    let n = arr.check_length(10);              // 10: rejects a negative count, or one too big for a data stack
+    print(".check_length(10) = ", n);
+    // let bad = arr.range_index(other[0..1], "not mine");   // would ABORT: that slice is not inside arr
+
+    // =================================================================
+    // Pools: the standard library's slot_pool / slice_pool (topic 21).
+    // They are root structs: the data is in `.items`, every slot stays a
+    // live value, and freeing never releases memory.
+    // =================================================================
+    var pool = slot_pool<Item> {};
     let s0 = pool.alloc_index(Item { id: 10, weight: 1.0 });  // index of a slot holding v
     let s1 = pool.alloc_index(Item { id: 11, weight: 1.0 });
     pool.free(s0);                             // slot 0 recorded for reuse (no memory freed)
     let s2 = pool.alloc_index(Item { id: 12, weight: 2.0 });  // reuses slot 0
     let node .= pool.alloc_ref(Item { id: 13, weight: 3.0 }); // same, but returns a reference
     print("alloc_ref -> ", node);
-    pool.free(pool.index_of(node));            // reference -> slot index -> freed
-    print("pool: slots ", s0, " ", s1, " ", s2, ", len ", pool.len, ", ", pool);
+    pool.free_ref(node);                       // free by reference
+    print("pool: slots ", s0, " ", s1, " ", s2, ", len ", pool.items.len, ", ", pool.items);
 
-    // `reusable[]`: a SLICE pool hands out runs of elements instead of slots
-    reusable[] var spool: i64[>..] = [];
+    // slice_pool hands out runs of elements instead of slots
+    var spool = slice_pool<i64> {};
     let ra = spool.alloc_slice(3);             // 3 default (zero) elements
     ra[0] = 1; ra[1] = 2; ra[2] = 3;
-    let rb = spool.alloc_slice(2);
-    rb[0] = 7; rb[1] = 8;
+    let rb = spool.alloc_copy([7, 8]);         // allocate and copy in one step
     spool.free_slice(ra);                      // run recorded for reuse
     let rc = spool.alloc_slice(2);             // taken from the freed run, reset to defaults
     let rd = spool.realloc_slice(rb, 4);       // rb is at the end: grows in place
-    print("slice pool: c=", rc, " d=", rd, " len=", spool.len, " ", spool);
-    // A slice pool has no alloc_index/alloc_ref/free; a plain pool has no *_slice ops.
+    print("slice pool: c=", rc, " d=", rd, " len=", spool.items.len, " ", spool.items);
+    // slice_pool has no alloc_index/alloc_ref/free; slot_pool has no *_slice functions.
+    // The builtin `reusable var` / `reusable[] var` pools still work but are deprecated.
 
     // -----------------------------------------------------------------
     // exit(code): ends the program right here with the given exit code.
