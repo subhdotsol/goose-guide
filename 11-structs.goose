@@ -57,9 +57,39 @@ struct Order { id: varint, customer: u8[varint], items: Item[varint] }
 // in a local/global/by-value param/result, never as an element).
 // ---------------------------------------------------------------------
 struct Stack { name: u8[..8], items: i64[>..<] }
-// struct Bad { items: i64[>..], n: i64 }     // ERROR: a resizable field must be the LAST one
+// struct Bad { items: i64[>..], n: i64 }     // ERROR: "resizable field items of struct Bad must be the
+//                                            //  final field; use root struct for independently stored fields"
 
 fn push_twice(s: Stack&, v: i64) { s.items.push(v); s.items.push(v); }   // T& = reference param
+
+// ---------------------------------------------------------------------
+// Root structs: `root struct` stores EACH field separately, so several
+// fields can be resizable and grow independently, in any order.
+//   * the owner must be a local or global variable, built by a literal
+//   * functions take it by reference (`Workspace<T>&`)
+//   * it can't be copied, assigned whole, passed or returned by value,
+//     used as a temporary, or put in another struct, array or enum
+//   * no `pad`, no whole-value `==`, no to_bytes of the owner (serialize
+//     a field instead: to_bytes(state.items))
+// `root` is a keyword only right before `struct`.
+// ---------------------------------------------------------------------
+root struct Workspace<T> {
+    items: T[>..] = [],                       // grow-only
+    scratch: i64[>..<] = [],                  // grow-shrink, stored separately from items
+    calls: i64 = 0                            // ordinary fields work as usual
+}
+
+fn add<T>(s: Workspace<T>&, value: T) -> T& {
+    s.calls += 1;
+    let result .= s.items.push(value);
+    s.scratch.push(s.calls);
+    s.scratch.clear();                        // shrinking scratch can't touch items: result stays valid
+    return result;
+}
+
+// struct Holder { w: Workspace<i64> }        // ERROR: "root struct ... can only be owned by a local or
+//                                            //  global variable; nested root owners are not supported"
+// fn by_value(w: Workspace<i64>) { }         // ERROR: "... pass it by reference instead"
 
 // ---------------------------------------------------------------------
 // Generic structs: monomorphized like generic functions.
@@ -175,6 +205,19 @@ fn main() {
     let sz = Size2 { 3.0, 4.0 };
     print("same fields, different type: ", sz);
     // Ordering operators (< > ...) exist on numbers only, not on structs.
+
+    // ---------------------------------------------------------------
+    // Root structs: several independently growing fields under one owner
+    // ---------------------------------------------------------------
+    var state = Workspace<i64> { .. };        // all fields from their defaults
+    let first .= state.add(7);                // a reference into state.items
+    state.add(8);
+    state.scratch.push(99);                   // grows its own region; `first` is unaffected
+    print("root struct: first=", first, " items=", state.items, " scratch=", state.scratch, " calls=", state.calls);
+    let view = state;                         // binds a REFERENCE to the owner, not a copy
+    print("through a reference: ", view.items.len);
+    // let dup = copy(state);                 // ERROR: "root owners cannot be copied; bind a reference instead"
+    print("one field as bytes: ", to_bytes(state.items).len, " bytes");
 
     // ---------------------------------------------------------------
     // Fixed-size structs are plain values: assignment makes an independent copy.
