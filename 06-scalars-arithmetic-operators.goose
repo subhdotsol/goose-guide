@@ -111,6 +111,13 @@ fn main() {
     // Comparison: < <= > >= == !=   (they produce bool)
     // ---------------------------------------------------------------
     print("compare: ", x < y, " ", x <= 17, " ", x > y, " ", x >= 18, " ", x == 17, " ", x != y);
+    // A comparison the TYPE alone decides is a WARNING (generic code is exempt):
+    let count: u32 = 5;
+    let level: u8 = 7;
+    // print(count < 0);             // warning: "comparison is always false: u32 values are 0 to 4294967295"
+    // print(level <= 255);          // warning: "comparison is always true: u8 values are 0 to 255"
+    // print(level > 300);           // ERROR: "constant 300 does not fit u8"
+    print("comparisons the type doesn't decide: ", count > 3, " ", level < 200);
 
     // ---------------------------------------------------------------
     // Logical: && || !
