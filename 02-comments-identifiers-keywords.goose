@@ -21,8 +21,14 @@ fn main() {
     let c: f64 = 3.14;      // 64-bit floating point
     let flag: bool = true;  // boolean
 
+    // Contextual keywords: `root` is a keyword only right before `struct`
+    // (`root struct S { ... }`, topic 11). Anywhere else it is a plain name.
+    let root = 1;
+    // `reusable` is still a keyword, but the builtin pools it makes are
+    // deprecated: use the library's slot_pool / slice_pool (topic 21).
+
     // Print the values so the bindings are used.
-    print(my_variable, " ", _private, " ", value123);
+    print(my_variable, " ", _private, " ", value123, " ", root);
     print(enabled, " ", disabled);
     print(nothing == null);  // an optional can be compared against null
     print(a, " ", b, " ", c, " ", flag);
