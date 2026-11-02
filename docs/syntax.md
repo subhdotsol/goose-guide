@@ -31,7 +31,7 @@ Run any snippet by wrapping it in `fn main() { ... }` and running
 18. [Generics, function values, blocks](#18-generics-function-values-blocks)
 19. [Recursion](#19-recursion)
 20. [Errors: return … from, assert, abort](#20-errors-return--from-assert-abort)
-21. [Pools: reusable and reusable[]](#21-pools-reusable-and-reusable)
+21. [Pools: slot_pool and slice_pool](#21-pools-slot_pool-and-slice_pool)
 22. [Index types and checkfree](#22-index-types-and-checkfree)
 23. [const for (compile-time expansion)](#23-const-for-compile-time-expansion)
 24. [Modules, packages, namespaces, globals](#24-modules-packages-namespaces-globals)
@@ -76,7 +76,7 @@ fn main() {                      // entry point: `main` in the root file
 
 - **Identifiers**: `[A-Za-z_][A-Za-z0-9_]*`.
 - **Keywords**: `import namespace struct enum type fn thread_fn export simd
-  recursive let var extern const pad reusable if else while for in loop block
+  recursive let var extern const pad reusable (deprecated) if else while for in loop block
   guard defer match return break continue as true false null self bool varint i8 i16
   i32 i64 u8 u16 u32 u64 f32 f64`
 - **Contextual keywords** (keywords only in one position, ordinary names
@@ -85,6 +85,7 @@ fn main() {                      // entry point: `main` in the root file
   - `upto` in an index type
   - `inline` and `checkfree` before `fn`
   - `fields`, `variants` and `types` in a `const for` header
+  - `root` directly before `struct`
 
 ---
 
@@ -156,11 +157,12 @@ Types are written **postfix**: `u8[]&` is a reference to an array of bytes.
 | `T[>..<]` | **grow-shrink** (stacks, queues, heaps) |
 | `T[:]`, `const T[:]` | slice (a view), read-only slice |
 | `Point`, `Pair<i64>` | struct, generic struct |
+| `State`, `State&` | root struct owner (local/global only), reference to one |
 | `Shape`, `Shape..`, `Shape.Circle` | enum in fixed mode, enum in variable mode, one variant as a type |
 | `T&`, `T?` | reference, optional (nullable) reference |
 | `T&<u32>`, `T&<u32 in pool>`, `T&<u32>?` | relative references |
 | `const T`, `const T&`, `const (u8[:])&` | read-only |
-| `u32 in a`, `u32 upto a` | index type for global array `a`, bound type |
+| `u32 in a`, `u32 upto a` | index type for global array `a` (or a global root's field, `u32 in pool.items`), bound type |
 | `fn(i64) -> bool` | the shape of a function value (used as a bound) |
 
 When a postfix follows an index or relative-reference type, add parentheses:
@@ -208,6 +210,7 @@ let a = [1, 2, 3] + [10, 20, 30];   // memberwise math on fixed arrays and struc
 - Reference identity: `.==`, `.!=`
 - Assignment: `= .= += -= *= /= %= <<= >>= &= ^= |=`, plus `++` and `--`
 - There is **no** ternary `?:`. Use `if` as an expression.
+- A comparison the type alone decides is a **warning**: `e < 0` of a `u32` (always false), `b <= 255` of a `u8` (always true). A constant the type can't hold is an **error**: `b > 300` of a `u8`. Generic code is exempt.
 
 ---
 
@@ -256,6 +259,16 @@ xs.resize(6, 0);            // grow with copies of 0 (or shrink)
 xs.pop_n(2);
 xs.clear();
 print(small.cap);           // .cap on limited arrays
+```
+
+Checked operations (they abort in every build when the check fails):
+
+```goose
+var a: i64[>..] = [1, 2, 3, 4, 5];
+a[1..4].move_from(a[0..3]);     // equal-length copy, safe when the slices overlap: [1, 1, 2, 3, 5]
+let at = a.range_index(a[2..]); // 2: start index of a slice that lies inside a (0 for an empty slice)
+let n = a.check_length(10);     // 10: rejects a negative count or one too big for a data stack
+// both take an optional message: a.range_index(s, "not mine")
 ```
 
 - References into a `T[>..]` **stay valid forever**, because growth never moves memory.
@@ -378,6 +391,41 @@ let q = Pair { a: 0.5, b: 1.5 };                   // T inferred
 - `==` compares memberwise. A reference field compares by identity.
 - An optional field with no default is `null` when left out.
 - A `varint` field is written only at construction.
+
+**Root structs**: each field is stored separately, so several fields can be
+resizable and grow independently, in any order.
+
+```goose
+root struct Workspace<T> {
+    items: T[>..] = [],
+    scratch: i64[>..<] = [],
+    calls: i64 = 0
+}
+
+fn add<T>(s: Workspace<T>&, value: T) -> T& {   // always passed by reference
+    s.calls += 1;
+    let result .= s.items.push(value);
+    s.scratch.push(s.calls);
+    s.scratch.clear();                           // other fields are separate regions: result stays valid
+    return result;
+}
+
+fn main() {
+    var state = Workspace<i64> { .. };           // built by a literal at its declaration
+    let first .= state.add(7);
+    state.add(8);
+    print(first, " ", state.items, " ", state.calls);   // 7 [7, 8] 2
+}
+```
+
+- The owner must be a local or global variable. It can't be copied, assigned
+  whole, passed or returned by value, used as a temporary, or put in another
+  struct, array or enum.
+- Functions take `S&`. Owner references can be optional, stored, returned
+  and captured, under the usual lifetime rules.
+- No `pad`, no whole-value `==` or arithmetic, no serialization or C layout
+  for the owner. Serialize fields separately: `to_bytes(state.items)`.
+- `root` is a keyword only before `struct`; elsewhere it is an ordinary name.
 
 ---
 
@@ -516,11 +564,13 @@ fn insert(pool: Node[>..]&, key: i32) {
 | `self` | in a literal: a link to the value being built |
 
 ```goose
-struct Ring { val: i64, prev: Ring&<u32 in ring>, next: Ring&<u32 in ring> }
-reusable var ring: Ring[>..] = [];
-// let head = ring.alloc_index(Ring { val: 0, prev: self, next: self });
+import slot_pool;
+struct Ring { val: i64, prev: Ring&<u32 in ring.items>, next: Ring&<u32 in ring.items> }
+var ring = slot_pool<Ring> {};
+// let head .= ring.alloc_with() { Ring { val: 0, prev: self, next: self } };
 ```
 
+- The pool in `in pool` is a global grow-only array, or a grow-only array field of a global `var` root struct (`ring.items`).
 - A value holding self-relative links cannot be copied. Build it in place, bind it with `.=`, and use `&` binders in `match`.
 
 ---
@@ -772,26 +822,45 @@ exit(1);              // end the program with an exit code
 
 ---
 
-## 21. Pools: reusable and reusable[]
+## 21. Pools: slot_pool and slice_pool
 
-A pool is a grow-only array with a hidden freelist, for data whose lifetimes don't nest.
+A pool is a grow-only array with a freelist, for data whose lifetimes don't
+nest. Use the standard library's `slot_pool<T>` and `slice_pool<T>`, which
+are root structs (§11) with an `items` array.
 
 ```goose
+import slot_pool;
+import slice_pool;
 struct Job { n: i32 }
 
-reusable var pool: Job[>..] = [];
-let i0 = pool.alloc_index(Job { 1 });      // the index of a slot (reuses a freed one)
+var pool = slot_pool<Job> {};
+let i0 = pool.alloc_index(Job { 1 });      // the index of a slot (reuses the latest freed one)
 pool.free(i0);                             // put the slot back
 let jr .= pool.alloc_ref(Job { 2 });       // a reference to a slot
-pool.free(pool.index_of(jr));              // reference → index → free
+pool.free_ref(jr);                         // free by reference (= pool.free(pool.items.index_of(jr)))
+// let n .= pool.alloc_with() { Job { 3 } };   // build in place in the slot (needed for `self` links)
+print(pool.items.len);                     // index/iterate through .items; len counts free slots too
 
-reusable[] var spans: i64[>..] = [];       // slice pool
-let s1 = spans.alloc_slice(3);             // 3 default-valued elements
-let s2 = spans.realloc_slice(s1, 5);       // resize, in place if possible
-spans.free_slice(s2);
+var spans = slice_pool<i64> {};            // runs of elements
+var s1 = spans.alloc_slice(3);             // 3 default-valued elements
+s1 = spans.realloc_slice(s1, 5);           // resize, in place if possible
+let s2 = spans.alloc_copy([1, 2, 3]);      // allocate and copy in one step
+spans.free_slice(s1);
+spans.recycle_all();                       // everything reusable again (also on slot_pool)
 ```
 
+- Functions take pools as `slot_pool<T>&` / `slice_pool<T>&`.
 - `free` never releases memory. A stale reference reads a valid value of the right type (a logic bug, but never memory corruption).
+- Don't shrink or replace `items` or edit the bookkeeping fields yourself.
+- A pool owner can't be sent to a worker. Workers can make their own pools.
+
+**Deprecated** (still compiles, no warning yet): the builtin pools.
+
+| Old | New |
+|---|---|
+| `reusable var p: T[>..] = [];` | `var p = slot_pool<T> {};` |
+| `reusable[] var p: T[>..] = [];` | `var p = slice_pool<T> {};` |
+| `p[i]`, `p.len`, `u32 in p` | `p.items[i]`, `p.items.len`, `u32 in p.items` |
 
 ---
 
@@ -816,7 +885,7 @@ checkfree fn total(ids: WId[:]) -> i64 {    // compile error if any bounds check
 // edges.push(0 as WId);             // `as` is checked at runtime in every build; `as!` is not allowed
 ```
 
-- The array must be a global `var` grow-only array of fixed-size elements, and it can never shrink.
+- The array must be a global `var` grow-only array of fixed-size elements, and it can never shrink. It may also be a direct field of a global `var` root struct: `u32 in pool.items`.
 - An index converts implicitly to a plain integer.
 - `assert(b.len >= a.len)` lets the compiler remove checks on `b[i]`, for an `i` that is an index into `a`.
 - `goose --bce-lines` reports which bounds checks remain on each line.
@@ -931,6 +1000,11 @@ fn main() {
 
 Build threaded programs with `goose build`; the JIT cannot run them.
 
+Root struct owners (including pools) and references to them can't cross a
+queue, and a worker can't use a root global. A worker may create its own
+local owners; `samples/32_pool_worker_snapshots.goose` copies a pool's fields
+into one.
+
 ---
 
 ## 26. Serialization
@@ -963,10 +1037,11 @@ export fn hello() -> const u8[:] { return "Hello!" }      // callable from C
 export "c_add" fn add(a: i32, b: i32) -> i32 { a + b }    // with a chosen C name
 ```
 
-- Types that can cross: scalars, `bool`, flat fixed-size structs, `T&` (as a pointer), `T[:]` (as data + length), `u8[>..]&` (as a builder).
+- Types that can cross: scalars, `bool`, flat fixed-size structs, `T&` (as a pointer), `T[:]` (as data + length), `T[>..]&` of a flat `T` (as a builder `gs_rref`; `gs_bld_append` appends bytes to a `u8[>..]&`).
 - Opaque handles are `u64`.
 - Your own C goes in a `foo.build` sidecar beside `foo.goose`: `c_sources = ["impl.c"];`.
-- To use Goose from a C host: `goose --standalone --header hello.h -o hello.c hello.goose`, and call `goose_init(argc, argv)` once.
+- `c_headers = ["include/adapters.h"];` in a sidecar (or `--include h.h` on the command line) puts a header into the generated C, so `static inline` bodies for `extern fn`s need no separate C build. Goose's C names: `mylib::Pair` → `mylib_Pair_g5` (5 = length of `mylib`), `Pair` → `Pair_g`, field `lo` → `lo_g`.
+- To use Goose from a C host: `goose --standalone --header hello.h -o hello.c hello.goose`, and call `goose_init(argc, argv)` once. `goose_exit()` ends the program and frees what `goose_init` set up, so the host can call `goose_init` again (for example, to reload a rebuilt library). Call it from the same thread, with no worker still running.
 
 ---
 
@@ -1007,8 +1082,11 @@ simd fn checksum(xs: u8[:]) -> u32 { var h: u32 = 0; for x in xs { h += x as u32
 | `thread_spawn`, `thread_spawn_contained`, `thread_wait`, `hardware_threads` | threads |
 | `qput`, `qget<T>`, `qpoll<T>`, `qlimit<T>` | queues |
 
-- **Array members**: `.len .cap .push .append .pop .pop_n .resize .clear .index_of`
-- **Pool members**: `.alloc_index .alloc_ref .free .alloc_slice .realloc_slice .free_slice`
+- **Array members**: `.len .cap .push .append .pop .pop_n .resize .clear .index_of .range_index .check_length`
+- **Slice member**: `.move_from(src)`
+- **`slot_pool` functions**: `.alloc_index .alloc_ref .alloc_with .alloc_index_with .free .free_ref .recycle_all`
+- **`slice_pool` functions**: `.alloc_slice .alloc_copy .realloc_slice .free_slice .recycle_all`
+- **Deprecated `reusable` members**: `.alloc_index .alloc_ref .free .alloc_slice .realloc_slice .free_slice`
 
 ---
 
@@ -1041,12 +1119,15 @@ From tightest to loosest (the same as Rust):
 | Module | Import | Highlights |
 |---|---|---|
 | `std` | `import std;` | `min max clamp abs sign swap sort stable_sort filter map fold find find_index any all sum reverse each_rev dedup retain heap_push heap_pop binary_search lower_bound find split trim words join parse_int parse_flt to_lower to_upper rand_int rand_flt hash` |
+| `slot_pool` | `import slot_pool;` | `var p = slot_pool<T> {}`, then `alloc_index alloc_ref alloc_with alloc_index_with free free_ref recycle_all`; data in `p.items` |
+| `slice_pool` | `import slice_pool;` | `var p = slice_pool<T> {}`, then `alloc_slice alloc_copy realloc_slice free_slice recycle_all`; data in `p.items` |
 | `dictionary` | `import dictionary;` | `var d = dictionary<const u8[:], i64> {}`, then `d.insert(k, v)`, `d.get(k)` (gives `V?`), `d.contains(k)`, `d.update(k, 0) { it += 1; };`, `d.remove(k)`, `d.each() { … }` |
 | `vec` | `import vec;` | `vec2/3/4<T>`, `float3`, `int2`, … |
 | `math` | `import math;` | `sin cos tan asin acos atan sqrt pow exp log floor ceil round trunc mul_add radians degrees is_nan is_inf is_finite` (the last four also take `f32`) |
 | `os` | `import os;` | `read_file write_file write_file_atomic append_file delete_file rename_file file_exists is_dir make_dir delete_dir list_dir read_line read_stdin write_stdout write_stderr args arg arg_count env time time_ns clock clock_ns sleep sleep_ms resource_dir` |
 | `exception` | `import exception;` | `exception::try<E>(body) { e => … }`, `exception::try<E>(body, catch, finally)`, `exception::throw(v)` |
-| `json`, `csv`, `regex`, `base64`, `binary`, `ffi` | `import json;` … | namespaced: `json::…`, `csv::…`, `regex::…` |
+| `binary` | `import binary;` | `binary::read_u8`, `read_i8`, `read_{u,i}{16,32,64}{le,be}`, `read_f32le/be`, `read_f64le/be`, `read_bytes`, `read_name`, each giving `value, ok`; a `Reader` cursor has the same reads plus `skip` |
+| `json`, `csv`, `regex`, `base64`, `ffi` | `import json;` … | namespaced: `json::…`, `csv::…`, `regex::…` |
 | `gfx`, `audio`, `ui`, `physics` | external packages | graphics (SDL3 GPU), audio, Nuklear UI, Box3D physics |
 
 `docs/stdlib.md` lists every function's signature.
@@ -1072,3 +1153,4 @@ Goose deliberately does not have:
 - Operator overloading. Only the `format` hook for printing.
 - Shared memory between threads, locks or atomics.
 - Size generics (`fn f<N>(a: T[N])`).
+- More than one resizable field in an ordinary struct (use a `root struct`), or nested root owners and arrays of them.
