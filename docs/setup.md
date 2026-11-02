@@ -63,10 +63,13 @@ build/goose toolchain
    ```bash
    cmake --build build -j 8
    ```
-   This produces `build/goose`. The binary had fallen behind the source after
-   new commits, so it was rebuilt with the same command. `build/goose version`
-   should print the current commit hash (e.g. `goose a108677d ...`).
+   This produces `build/goose`. After each `git pull` it was rebuilt with the
+   same command. `build/goose version` should print the current commit hash
+   (currently `goose eadca409 (runtime 3025e5810379)`).
 4. **Put `goose` on the PATH** (see §3).
+5. **Kept up to date** by fast-forward pulls (`git reflog` shows them:
+   `a108677d` → `64d62fc7` → `b6688e17` → `cce94b91` → `2ed1a63d` →
+   `eadca409`) and a rebuild after each one (§7).
 
 ---
 
@@ -134,7 +137,18 @@ cmake -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
 cmake --build build-sanitize -j 8
 ```
 
-### 4.5 The embedded C runtime (only if you edit `src/runtime/*`)
+### 4.5 Deterministic language-server test (optional)
+
+This arrived in the latest pull. It is a separate CMake target, off by
+default, so give it its own folder:
+
+```bash
+cmake -S . -B build-lsp -DGOOSE_BUILD_LSP_TESTS=ON
+cmake --build build-lsp --target goose_lsp_test --config Debug
+ctest --test-dir build-lsp -C Debug -R lsp_call_hierarchy --output-on-failure
+```
+
+### 4.6 The embedded C runtime (only if you edit `src/runtime/*`)
 
 `src/runtime_inline.h` is generated from `src/runtime/`. After editing the runtime:
 
@@ -143,7 +157,7 @@ build/goose --gen-runtime-header
 cmake --build build -j 8
 ```
 
-### 4.6 VS Code extension
+### 4.7 VS Code extension
 
 To install the prebuilt one that is in the repo:
 
@@ -163,7 +177,7 @@ an Extension Development Host. If VS Code can't find the compiler, set
 `goose.compilerPath` to
 `/Users/subh/Desktop/code-playground/oss/goose/build/goose`.
 
-### 4.7 Tree-sitter grammar (for Neovim, Helix or Zed)
+### 4.8 Tree-sitter grammar (for Neovim, Helix or Zed)
 
 ```bash
 python3 tree-sitter/build.py            # generate the parser (installs a pinned tree-sitter-cli)
@@ -172,12 +186,20 @@ python3 tree-sitter/build.py --check    # run the corpus and parse every .goose 
 
 Editor setup is in `tree-sitter/README.md` and `docs/editors.md`.
 
-### 4.8 Documentation site
+### 4.9 Documentation site
 
 ```bash
 brew install pandoc
 python3 docs/site/build.py --out build/site --check
 open build/site/index.html
+```
+
+The build also writes a search index (`docs/site/generate_search.py`), so the
+site has a search box. Search may not work when the page is opened as a
+`file://` URL; if so, serve it locally:
+
+```bash
+python3 -m http.server -d build/site 8000   # then open http://localhost:8000
 ```
 
 ---
@@ -198,7 +220,11 @@ goose format --check samples stdlib         # what CI checks
 ```
 
 Programs that use threads must use `goose build`. The in-process JIT
-can't run them.
+can't run them (for example `samples/23_mandelbrot_threads.goose` and
+`samples/32_pool_worker_snapshots.goose`).
+
+Pools: `reusable` / `reusable[]` still compile but are deprecated. New code
+should `import slot_pool;` or `import slice_pool;` (see `syntax.md` §21).
 
 ---
 
@@ -261,6 +287,8 @@ python3 test/lsp_sweep.py --quick
 build/goose format --check samples stdlib
 ```
 
+The deterministic LSP call-hierarchy test runs through `ctest` (§4.5).
+
 ### 6.6 Benchmarks (optional, slow)
 
 ```bash
@@ -321,6 +349,7 @@ still, keep your own work on separate branches (§8).
 | If the update touched... | Run |
 |---|---|
 | `src/runtime/*` (and `runtime_inline.h` was not updated by the commit) | `build/goose --gen-runtime-header && cmake --build build -j 8` |
+| `docs/site/` | `python3 docs/site/build.py --out build/site --check` |
 | `vscode/` | `code --install-extension vscode/goose-language.vsix --force` |
 | `tree-sitter/` | `python3 tree-sitter/build.py` |
 | `src/blessed.txt` (package versions), with a `GOOSE_BUILTIN_LIBS=all` build | `cmake -B build -DGOOSE_BUILTIN_LIBS=all && cmake --build build -j 8` |
@@ -369,6 +398,10 @@ Conventions for a pull request:
 - CI must pass on Linux, macOS and Windows.
 - New test fixtures need a `test/expected/<name>.out` file.
 - If you change the grammar, update `tree-sitter/grammar.js` too.
+- `goose format` now lines up the types and `=`s of consecutive declarations
+  (struct fields, runs of `const`s), so run `build/goose format` on any
+  `.goose` file you touch before `--check`.
+- Use `slot_pool` / `slice_pool` rather than `reusable` in new samples, tests and stdlib code.
 
 ---
 
@@ -383,3 +416,6 @@ Conventions for a pull request:
 | gfx or physics samples are skipped | rebuild with `-DGOOSE_BUILTIN_LIBS=all` (§4.2) |
 | The VS Code extension can't find the compiler | set `goose.compilerPath` to `.../goose/build/goose` |
 | Strange build errors after `git pull` | clean rebuild (§7.4) |
+| `format --check` fails on files you didn't change much | the formatter aligns declaration runs; run `build/goose format <file>` |
+| An abort points at your line, not inside the stdlib | expected: checks inside stdlib functions report the program's calling line |
+| New "comparison is always true/false" warnings | the compiler now flags comparisons the type alone decides (e.g. `u32 < 0`); remove or fix the comparison |
