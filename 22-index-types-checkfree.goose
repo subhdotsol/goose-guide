@@ -12,7 +12,8 @@ import std;
 // the end is allowed), used for the end of a range.
 //
 // Rules for the array `a`:
-//   * a GLOBAL `var` (or `reusable var`) grow-only array `T[>..]`
+//   * a GLOBAL `var` grow-only array `T[>..]`, or a grow-only array FIELD
+//     of a global `var` root struct (`u32 in table.rows`, `u32 in pool.items`)
 //   * of fixed-size elements
 //   * it can NEVER shrink anywhere (so a valid index stays valid forever)
 // The array is part of the type: `u32 in weights` is neither `u32` nor
@@ -24,6 +25,18 @@ var edges: WId[>..];                      // an array OF indices into weights
 
 // `upto`: lo and hi are each <= edges.len, so `lo..hi` is a valid range of edges.
 struct Span { lo: u32 upto edges, hi: u32 upto edges }
+
+// A field of a global root struct (topic 11) can be named too. The type says
+// exactly which field: `u32 in table.rows` is not an index into `table.scores`.
+root struct Table { rows: i64[>..] = [], scores: i64[>..] = [], lookups: i64 = 0 }
+var table = Table { .. };
+type RowId = u32 in table.rows;
+
+checkfree fn sum_rows(ids: RowId[:]) -> i64 {
+    var t = 0;
+    for id in ids { t += table.rows[id]; }   // id: RowId -> no bounds check on table.rows[id]
+    return t;
+}
 
 // ---------------------------------------------------------------
 // checkfree: compile error if ANY bounds check remains in the function
@@ -109,6 +122,18 @@ fn main() {
     let all = Span { lo: 0 as (u32 upto edges), hi: edges.len as (u32 upto edges) };
     let tail = Span { lo: 1 as (u32 upto edges), hi: edges.len as (u32 upto edges) };
     print("span_total(all) = ", span_total(all), ", span_total(tail) = ", span_total(tail));
+
+    // ---------------------------------------------------------------
+    // An index into a root struct's field
+    // ---------------------------------------------------------------
+    table.rows.push(100);
+    table.rows.push(200);
+    table.scores.push(1);                // a separate field: it grows independently
+    var picked: RowId[>..] = [];
+    picked.push(1 as RowId);             // checked once here: 1 < table.rows.len
+    picked.push(0 as RowId);
+    // picked.push(1 as (u32 in table.scores));   // ERROR: "expected a value of type u32 in table.rows, got u32 in table.scores"
+    print("sum_rows(picked) = ", sum_rows(picked));   // 200 + 100
 
     // Never shrink: any shrinking operation on weights or edges is a compile error.
     // weights.pop();                     // ERROR: an array named by an index type can't shrink
