@@ -55,7 +55,7 @@ a short example for each feature, covering:
 - Control flow, loops and functions
 - Generics, function values and blocks
 - Recursion and error handling (`return ... from`, `assert`, `abort`)
-- Pools, index types and compile-time `const for`
+- Root structs, library pools (`slot_pool`, `slice_pool`), index types and compile-time `const for`
 - Modules, packages, namespaces and globals
 - Threads, serialization and C interoperability
 - Function qualifiers, builtins, operator precedence and the standard library
@@ -118,7 +118,7 @@ compile are kept as commented-out code with the compiler's error message.
 | 03 | `03-literals.goose` | 18 | `18-generics-function-values-blocks.goose` |
 | 04 | `04-variables-let-var-const.goose` | 19 | `19-recursion.goose` |
 | 05 | `05-types-at-a-glance.goose` | 20 | `20-errors-return-from-assert-abort.goose` |
-| 06 | `06-scalars-arithmetic-operators.goose` | 21 | `21-pools-reusable.goose` |
+| 06 | `06-scalars-arithmetic-operators.goose` | 21 | `21-pools-slot-slice.goose` |
 | 07 | `07-casts-and-conversions.goose` | 22 | `22-index-types-checkfree.goose` |
 | 08 | `08-arrays.goose` | 23 | `23-const-for.goose` |
 | 09 | `09-strings-and-printing.goose` | 24 | `24-modules-packages-namespaces-globals.goose` |
