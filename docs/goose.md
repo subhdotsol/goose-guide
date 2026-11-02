@@ -264,7 +264,7 @@ before you start a large language change.
 ### Medium: editor and tooling work
 
 6. **Tree-sitter queries.** Only `highlights.scm` exists. Add `locals.scm`, `indents.scm`, `folds.scm`, `textobjects.scm` and `injections.scm` (`tree-sitter/queries/`). Upstreaming to nvim-treesitter or Helix, or a Zed extension, would also help.
-7. **LSP features** in `src/lsp_features.h`: code actions or quick fixes (e.g. "insert `copy(x)`", "remove redundant `as`"), document highlight, go to implementation for case functions, range formatting, UTF-8 position encoding.
+7. **LSP features** in `src/lsp_features.h`: code actions or quick fixes (e.g. "insert `copy(x)`", "remove redundant `as`"), document highlight, go to implementation for case functions, range formatting. (UTF-8 position encoding is in our open PR #190, see below.)
 8. **Formatter** (`src/format.h`): range formatting, ignore regions.
 9. **Run the LSP tests in CI**: `test/lsp_sweep.py --quick`, and the new deterministic `goose_lsp_test` (configure with `-DGOOSE_BUILD_LSP_TESTS=ON`, then `ctest -R lsp_call_hierarchy`), which CI doesn't build yet. Also add fuzzing of format idempotence.
 
@@ -272,7 +272,7 @@ before you start a large language change.
 
 10. **A `process` module** over the already vendored `third_party/subprocess`, and a sockets or networking module (both explicitly missing from v1).
 11. **More of `os`**: file metadata (size, mtime), path helpers, date and time formatting.
-12. **Utilities**: hashing (crc32, sha256), hex encoding, an INI or TOML reader, UTF-8 validation. `binary` now reads every width in both byte orders (#153) but has no writers: `write_u32le`/`write_u32be` and the rest, appending to a `u8[>..]&`, would mirror the readers.
+12. **Utilities**: sha256, hex encoding, an INI or TOML reader. Several are already taken by open upstream PRs, so check before starting: CRC-32 (#74), UTF-8 (#106), `binary` writers for every width and byte order (#182), ASCII classes (#185), bit utilities (#184), more `math` (#186). Crypto and networking live in an external library (issue #165).
 13. **Faster library loops**: specialize `push_n` and similar element loops (`bench/notes.md`).
 14. **Finish the move off `reusable`**: close the gaps listed in `docs/stdlib.md` "Migrating from reusable" and `docs/design/root_structs.md` (copying a whole pool into a worker, a compile-time check for freeing a slice into the wrong `slice_pool`), then add a deprecation warning.
 
@@ -301,6 +301,18 @@ remains.
 
 When a later pull completes another item from the list, move it here with
 its commit.
+
+### Our open pull requests
+
+| PR | What | Design doc item | Status |
+|---|---|---|---|
+| [#190](https://github.com/aardappel/goose/pull/190) "Offer UTF-8 positions to language clients that ask for them" | `goose lsp` answers `"positionEncoding": "utf-8"` to clients offering it in `general.positionEncodings` (Neovim 0.10+, Helix), so their columns are bytes with no conversion. Others keep UTF-16. New fixture `test/lsp/encodings.goose` and `check_position_encodings` in `test/lsp_protocol.py` | `docs/design/language_server.md` §10, "Position encoding" | Open; CI waits for a maintainer to approve the first-time contributor run |
+
+To try #190 in Neovim before it merges: build the `lsp-utf8-positions`
+branch of the fork, put `build/` on `PATH`, configure the server as in
+`docs/editors.md`, open `test/lsp/encodings.goose`, and run
+`:lua print(vim.lsp.get_clients({ name = 'goose' })[1].offset_encoding)`,
+which prints `utf-8`.
 
 ### Contribution conventions (inferred from CI and history)
 
