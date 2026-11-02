@@ -27,5 +27,14 @@ int main(int argc, char **argv) {
 
     /* 4. Goose globals persist between calls (same thread as goose_init!). */
     printf("[c] call_count()  = %lld\n", (long long)call_count());
+
+    /* 5. goose_exit ends the Goose program and frees what goose_init set up,
+          so goose_init can start it again (say, after reloading a rebuilt
+          library). Call it from the same thread, with no worker running.
+          The restart runs `main` again and resets the globals. */
+    goose_exit();
+    goose_init(argc, argv);
+    printf("[c] after goose_exit + goose_init: call_count() = %lld\n", (long long)call_count());
+    goose_exit();
     return 0;
 }

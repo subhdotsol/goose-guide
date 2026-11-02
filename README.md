@@ -223,6 +223,8 @@ Expected output:
 [c] c_add(20, 22) = 42
 [c] c_add(1, 2)   = 3
 [c] call_count()  = 2
+[goose] main ran inside goose_init
+[c] after goose_exit + goose_init: call_count() = 0
 ```
 
 What happens:
@@ -236,6 +238,10 @@ What happens:
   sets up the Goose runtime and globals and runs the Goose `main`, which is
   why the `[goose]` line prints first.
 - Goose globals persist between calls, so `call_count()` returns 2.
+- `goose_exit()` ends the Goose program and frees what `goose_init` set up.
+  Calling `goose_init` again starts it fresh: `main` runs a second time and
+  `call_count()` is back to 0. A host can use this to reload a rebuilt
+  library. Call it from the same thread, with no worker still running.
 - A `const u8[:]` return value reaches C as a pointer plus a length
   out-parameter. It is **not** NUL-terminated, so `host.c` prints it with
   `%.*s`.

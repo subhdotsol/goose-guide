@@ -144,4 +144,6 @@ fn main() {
 // host must call goose_init ONCE first: it sets up the runtime and globals
 // and runs the Goose `main` (if any). Exported functions are not
 // thread-safe: call them from the thread that called goose_init.
+// goose_exit() ends the program and frees what goose_init set up, so the
+// host can call goose_init again (e.g. to reload a rebuilt library).
 // =====================================================================
